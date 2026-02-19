@@ -1,0 +1,17 @@
+# Python virtual environments
+venv/
+ai_engine/venv/
+backend/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# Large videos
+video/
+
+# YOLO weights (optional but recommended)
+*.pt

@@ -1,0 +1,568 @@
+Traffic signal modern · HTML
+Copy
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Traffic Signal System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 5px 0;
+            flex-shrink: 0;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            letter-spacing: 2px;
+            background: linear-gradient(45deg, #00f2fe, #4facfe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 2px;
+        }
+
+        .subtitle {
+            color: #8b8b9a;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 12px;
+            padding: 0 10px;
+            flex: 1;
+            min-height: 0;
+            max-width: 100%;
+            margin: 0 auto;
+        }
+
+        .lane-container {
+            background: rgba(30, 30, 46, 0.6);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 10px;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .lane-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, 
+                rgba(255, 0, 0, 0.8) 0%, 
+                rgba(255, 0, 0, 0) 100%);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .lane-container.green::before {
+            background: linear-gradient(90deg, 
+                rgba(0, 255, 127, 0.8) 0%, 
+                rgba(0, 255, 127, 0) 100%);
+            opacity: 1;
+        }
+
+        .lane-container.yellow::before {
+            background: linear-gradient(90deg, 
+                rgba(255, 191, 0, 0.8) 0%, 
+                rgba(255, 191, 0, 0) 100%);
+            opacity: 1;
+        }
+
+        .lane-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .lane-title {
+            font-size: 1.4rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+        }
+
+        .signal-lights {
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .signal-light {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .signal-light.active {
+            box-shadow: 
+                0 0 10px currentColor,
+                0 0 20px currentColor,
+                inset 0 0 10px currentColor;
+        }
+
+        .signal-light.red.active {
+            background: #ff3838;
+            color: #ff3838;
+        }
+
+        .signal-light.yellow.active {
+            background: #ffbf00;
+            color: #ffbf00;
+        }
+
+        .signal-light.green.active {
+            background: #00ff7f;
+            color: #00ff7f;
+        }
+
+        .video-wrapper {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            flex: 1;
+            min-height: 0;
+            background: #0a0a15;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            display: block;
+            border-radius: 12px;
+            object-fit: cover;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 12px 18px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9rem;
+            z-index: 10;
+        }
+
+        .overlay-label {
+            color: #8b8b9a;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .overlay-value {
+            font-size: 1.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .vehicle-icon {
+            font-size: 1.5rem;
+        }
+
+        .timer-overlay {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 12px 18px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9rem;
+            z-index: 10;
+        }
+
+        .timer-value {
+            font-size: 2rem;
+            font-weight: 700;
+            font-family: 'Courier New', monospace;
+        }
+
+        .timer-value.green-timer {
+            color: #00ff7f;
+        }
+
+        .timer-value.yellow-timer {
+            color: #ffbf00;
+        }
+
+        .timer-value.red-timer {
+            color: #ff6b6b;
+        }
+
+        .status-panel {
+            margin: 10px auto 0;
+            background: rgba(30, 30, 46, 0.6);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 15px 20px;
+            border: 2px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            gap: 20px;
+            flex-shrink: 0;
+            max-width: 100%;
+        }
+
+        .status-item {
+            text-align: center;
+        }
+
+        .status-label {
+            color: #8b8b9a;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #00f2fe;
+        }
+
+        .phase-badge {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .phase-badge.ALL_RED {
+            background: rgba(255, 56, 56, 0.2);
+            color: #ff3838;
+            border: 1px solid rgba(255, 56, 56, 0.4);
+        }
+
+        .phase-badge.GREEN {
+            background: rgba(0, 255, 127, 0.2);
+            color: #00ff7f;
+            border: 1px solid rgba(0, 255, 127, 0.4);
+        }
+
+        .phase-badge.YELLOW {
+            background: rgba(255, 191, 0, 0.2);
+            color: #ffbf00;
+            border: 1px solid rgba(255, 191, 0, 0.4);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .waiting {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="header">
+    <h1>🚦 AI TRAFFIC CONTROL</h1>
+    <div class="subtitle">INTELLIGENT SIGNAL MANAGEMENT SYSTEM</div>
+</div>
+
+<div class="grid">
+    <div class="lane-container" id="lane-N">
+        <div class="lane-header">
+            <div class="lane-title">NORTH</div>
+            <div class="signal-lights">
+                <div class="signal-light red" data-lane="N" data-color="red"></div>
+                <div class="signal-light yellow" data-lane="N" data-color="yellow"></div>
+                <div class="signal-light green" data-lane="N" data-color="green"></div>
+            </div>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-N" src="../video/traffic1.mp4" muted loop></video>
+            <div class="video-overlay">
+                <div class="overlay-label">Vehicles</div>
+                <div class="overlay-value">
+                    <span class="vehicle-icon">🚗</span>
+                    <span id="count-N">0</span>
+                </div>
+            </div>
+            <div class="timer-overlay" id="timer-overlay-N">
+                <div class="overlay-label" id="timer-label-N">Time</div>
+                <div class="timer-value" id="timer-N">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="lane-container" id="lane-S">
+        <div class="lane-header">
+            <div class="lane-title">SOUTH</div>
+            <div class="signal-lights">
+                <div class="signal-light red" data-lane="S" data-color="red"></div>
+                <div class="signal-light yellow" data-lane="S" data-color="yellow"></div>
+                <div class="signal-light green" data-lane="S" data-color="green"></div>
+            </div>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-S" src="../video/traffic2.mp4" muted loop></video>
+            <div class="video-overlay">
+                <div class="overlay-label">Vehicles</div>
+                <div class="overlay-value">
+                    <span class="vehicle-icon">🚗</span>
+                    <span id="count-S">0</span>
+                </div>
+            </div>
+            <div class="timer-overlay" id="timer-overlay-S">
+                <div class="overlay-label" id="timer-label-S">Time</div>
+                <div class="timer-value" id="timer-S">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="lane-container" id="lane-E">
+        <div class="lane-header">
+            <div class="lane-title">EAST</div>
+            <div class="signal-lights">
+                <div class="signal-light red" data-lane="E" data-color="red"></div>
+                <div class="signal-light yellow" data-lane="E" data-color="yellow"></div>
+                <div class="signal-light green" data-lane="E" data-color="green"></div>
+            </div>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-E" src="../video/traffic3.mp4" muted loop></video>
+            <div class="video-overlay">
+                <div class="overlay-label">Vehicles</div>
+                <div class="overlay-value">
+                    <span class="vehicle-icon">🚗</span>
+                    <span id="count-E">0</span>
+                </div>
+            </div>
+            <div class="timer-overlay" id="timer-overlay-E">
+                <div class="overlay-label" id="timer-label-E">Time</div>
+                <div class="timer-value" id="timer-E">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="lane-container" id="lane-W">
+        <div class="lane-header">
+            <div class="lane-title">WEST</div>
+            <div class="signal-lights">
+                <div class="signal-light red" data-lane="W" data-color="red"></div>
+                <div class="signal-light yellow" data-lane="W" data-color="yellow"></div>
+                <div class="signal-light green" data-lane="W" data-color="green"></div>
+            </div>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-W" src="../video/traffic4.mp4" muted loop></video>
+            <div class="video-overlay">
+                <div class="overlay-label">Vehicles</div>
+                <div class="overlay-value">
+                    <span class="vehicle-icon">🚗</span>
+                    <span id="count-W">0</span>
+                </div>
+            </div>
+            <div class="timer-overlay" id="timer-overlay-W">
+                <div class="overlay-label" id="timer-label-W">Time</div>
+                <div class="timer-value" id="timer-W">0</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="status-panel">
+    <div class="status-item">
+        <div class="status-label">Current Phase</div>
+        <div class="status-value">
+            <span class="phase-badge" id="phase">ALL_RED</span>
+        </div>
+    </div>
+    <div class="status-item">
+        <div class="status-label">Active Lane</div>
+        <div class="status-value" id="activeLane">None</div>
+    </div>
+    <div class="status-item">
+        <div class="status-label">System Status</div>
+        <div class="status-value" id="systemStatus" style="color: #00ff7f;">● ONLINE</div>
+    </div>
+</div>
+
+<script>
+const lanes = ["N", "S", "E", "W"];
+const BACKEND_URL = "http://localhost:8000";
+
+// Track waiting times for each lane
+let waitingTimes = {
+    N: 0,
+    S: 0,
+    E: 0,
+    W: 0
+};
+
+let isBackendOnline = true;
+
+async function fetchSignalState() {
+    try {
+        const response = await fetch(`${BACKEND_URL}/traffic/status/1`);
+        const data = await response.json();
+        
+        // Backend is reachable
+        if (!isBackendOnline) {
+            isBackendOnline = true;
+            updateSystemStatus(true);
+        }
+        
+        updateUI(data);
+    } catch (error) {
+        console.log("Backend not reachable");
+        
+        // Backend is not reachable
+        if (isBackendOnline) {
+            isBackendOnline = false;
+            updateSystemStatus(false);
+        }
+    }
+}
+
+function updateSystemStatus(online) {
+    const statusElement = document.getElementById("systemStatus");
+    if (online) {
+        statusElement.innerHTML = '● ONLINE';
+        statusElement.className = 'status-value';
+        statusElement.style.color = '#00ff7f';
+    } else {
+        statusElement.innerHTML = '● OFFLINE';
+        statusElement.className = 'status-value';
+        statusElement.style.color = '#ff3838';
+    }
+}
+
+function updateUI(data) {
+    // Update vehicle counts
+    lanes.forEach(lane => {
+        document.getElementById("count-" + lane).innerText = data.counts[lane] || 0;
+    });
+
+    // Update phase badge
+    const phaseBadge = document.getElementById("phase");
+    phaseBadge.innerText = data.phase;
+    phaseBadge.className = "phase-badge " + data.phase;
+
+    // Update active lane
+    document.getElementById("activeLane").innerText = data.active_lane || "None";
+
+    // Update signal lights and timers
+    updateSignalsAndTimers(data);
+}
+
+function updateSignalsAndTimers(data) {
+    lanes.forEach(lane => {
+        const laneDiv = document.getElementById("lane-" + lane);
+        const video = document.getElementById("video-" + lane);
+        const timerDiv = document.getElementById("timer-" + lane);
+        const timerLabel = document.getElementById("timer-label-" + lane);
+        const timerOverlay = document.getElementById("timer-overlay-" + lane);
+        
+        // Reset all signal lights for this lane
+        document.querySelectorAll(`[data-lane="${lane}"]`).forEach(light => {
+            light.classList.remove("active");
+        });
+
+        // Remove lane container classes
+        laneDiv.classList.remove("green", "yellow", "waiting");
+
+        if (data.phase === "GREEN" && data.active_lane === lane) {
+            // Green signal for active lane
+            document.querySelector(`[data-lane="${lane}"][data-color="green"]`).classList.add("active");
+            laneDiv.classList.add("green");
+            video.play();
+            
+            timerLabel.innerText = "GREEN";
+            timerDiv.innerText = data.remaining_time + "s";
+            timerDiv.className = "timer-value green-timer";
+            
+            // Reset waiting time for this lane
+            waitingTimes[lane] = 0;
+
+        } else if (data.phase === "YELLOW" && data.active_lane === lane) {
+            // Yellow signal for active lane
+            document.querySelector(`[data-lane="${lane}"][data-color="yellow"]`).classList.add("active");
+            laneDiv.classList.add("yellow");
+            video.pause();
+            
+            timerLabel.innerText = "YELLOW";
+            timerDiv.innerText = data.remaining_time + "s";
+            timerDiv.className = "timer-value yellow-timer";
+
+        } else {
+            // Red signal for all other lanes
+            document.querySelector(`[data-lane="${lane}"][data-color="red"]`).classList.add("active");
+            video.pause();
+            laneDiv.classList.add("waiting");
+            
+            // Increment waiting time
+            if (data.active_lane && data.active_lane !== lane) {
+                waitingTimes[lane] += 1;
+            }
+            
+            timerLabel.innerText = "WAITING";
+            timerDiv.innerText = waitingTimes[lane] + "s";
+            timerDiv.className = "timer-value red-timer";
+        }
+    });
+}
+
+// Poll backend every second
+setInterval(fetchSignalState, 1000);
+
+// Initial load
+fetchSignalState();
+</script>
+
+</body>
+</html>
