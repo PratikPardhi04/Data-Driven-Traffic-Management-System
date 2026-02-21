@@ -1,99 +1,157 @@
 import cv2
 import torch
-import time
+import numpy as np
 from ultralytics import YOLO
 
-# =========================
+# ==========================================
 # SETTINGS
-# =========================
-INTERVAL = 2
-IMAGE_SIZE = 1280     # Good balance
-CONFIDENCE = 0.30
+# ==========================================
+MODEL_NAME = "yolov8x.pt"
+IMAGE_SIZE = 1280
+CONFIDENCE = 0.15
+VIDEO_PATH = "../video/traffic2.mp4"
+VEHICLE_CLASSES = ["car", "motorcycle", "bus", "truck"]
 
-MIN_GREEN = 20
-MAX_GREEN = 90
-
-# =========================
-# DEVICE
-# =========================
+# ==========================================
+# DEVICE & MODEL
+# ==========================================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using device:", device)
 
-# =========================
-# LOAD MODEL (Use l instead of x)
-# =========================
-model = YOLO("yolov8l.pt")   # Better speed/accuracy balance
+model = YOLO(MODEL_NAME)
 model.to(device)
 
-VEHICLE_CLASSES = ["car", "motorcycle", "bus", "truck"]
+# ==========================================
+# LOAD VIDEO
+# ==========================================
+cap = cv2.VideoCapture(VIDEO_PATH)
+if not cap.isOpened():
+    print("Error: Could not open video.")
+    exit()
 
-# =========================
-# LOAD VIDEOS
-# =========================
-videos = {
-    "N": cv2.VideoCapture("../video/traffic1.mp4"),
-    "S": cv2.VideoCapture("../video/traffic2.mp4"),
-    "E": cv2.VideoCapture("../video/traffic3.mp4"),
-    "W": cv2.VideoCapture("../video/traffic4.mp4")
-}
+# Get original resolution
+orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+print("Original Resolution:", orig_width, "x", orig_height)
 
-def calculate_green_time(vehicle_count):
-    green = 25 + vehicle_count * 0.8
-    return int(max(MIN_GREEN, min(MAX_GREEN, green)))
+# ==========================================
+# DRAW POLYGON INTERACTIVELY
+# ==========================================
+polygon_points = []
+drawing_done = False
 
-print("\n===== FAST 2-SECOND TRAFFIC MODE =====\n")
+def draw_polygon(event, x, y, flags, param):
+    global polygon_points, drawing_done
+    if drawing_done:
+        return
+    if event == cv2.EVENT_LBUTTONDOWN:
+        polygon_points.append([x, y])
+    elif event == cv2.EVENT_RBUTTONDOWN:
+        drawing_done = True
 
-# =========================
-# MAIN LOOP
-# =========================
-while True:
+cv2.namedWindow("Draw Polygon", cv2.WINDOW_NORMAL)
+cv2.setMouseCallback("Draw Polygon", draw_polygon)
 
-    cycle_start = time.time()
-    approach_counts = {}
+print("Draw polygon points with left click. Right click to finish.")
 
-    for direction, cap in videos.items():
+ret, frame = cap.read()
+if not ret:
+    print("Error reading video.")
+    exit()
 
-        ret, frame = cap.read()
+while not drawing_done:
+    temp_frame = frame.copy()
 
-        if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, frame = cap.read()
+    for pt in polygon_points:
+        cv2.circle(temp_frame, tuple(pt), 5, (0, 0, 255), -1)
 
-        results = model.predict(
-            frame,
-            imgsz=IMAGE_SIZE,
-            conf=CONFIDENCE,
-            device=device,
-            half=True,          # Faster on GPU
-            verbose=False
+    if len(polygon_points) > 1:
+        cv2.polylines(
+            temp_frame,
+            [np.array(polygon_points, np.int32)],
+            isClosed=False,
+            color=(0, 255, 0),
+            thickness=2
         )
 
-        count = 0
+    cv2.imshow("Draw Polygon", temp_frame)
 
-        for result in results:
-            if result.boxes is None:
+    if cv2.waitKey(1) & 0xFF == 27:
+        print("Polygon drawing canceled.")
+        exit()
+
+cv2.destroyWindow("Draw Polygon")
+print(f"Polygon points: {polygon_points}")
+
+# ==========================================
+# VEHICLE DETECTION LOOP
+# ==========================================
+drag_point = None
+
+def mouse_event(event, x, y, flags, param):
+    global drag_point, polygon_points
+    if event == cv2.EVENT_LBUTTONDOWN:
+        for i, pt in enumerate(polygon_points):
+            if abs(x - pt[0]) < 10 and abs(y - pt[1]) < 10:
+                drag_point = i
+    elif event == cv2.EVENT_MOUSEMOVE:
+        if drag_point is not None:
+            polygon_points[drag_point] = [x, y]
+    elif event == cv2.EVENT_LBUTTONUP:
+        drag_point = None
+
+cv2.namedWindow("Vehicle Detection & Counting", cv2.WINDOW_NORMAL)
+cv2.setMouseCallback("Vehicle Detection & Counting", mouse_event)
+
+print("Vehicle Detection Started...\n")
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        continue
+
+    polygon = np.array(polygon_points, np.int32)
+    cv2.polylines(frame, [polygon], True, (0, 255, 0), 2)
+
+    results = model.predict(
+        frame,
+        imgsz=IMAGE_SIZE,
+        conf=CONFIDENCE,
+        device=device,
+        half=True,
+        verbose=False
+    )
+
+    vehicle_count = 0
+
+    for result in results:
+        if result.boxes is None:
+            continue
+
+        for box in result.boxes:
+            cls = int(box.cls[0])
+            class_name = model.names[cls]
+
+            if class_name not in VEHICLE_CLASSES:
                 continue
 
-            for box in result.boxes:
-                cls = int(box.cls[0])
-                class_name = model.names[cls]
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
 
-                if class_name in VEHICLE_CLASSES:
-                    count += 1
+            if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
+                vehicle_count += 1
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+                cv2.circle(frame, (cx, cy), 4, (0, 0, 255), -1)
 
-        approach_counts[direction] = count
+    cv2.putText(frame, f"Count: {vehicle_count}", (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
 
-    active_lane = max(approach_counts, key=approach_counts.get)
-    vehicle_count = approach_counts[active_lane]
-    green_time = calculate_green_time(vehicle_count)
+    cv2.imshow("Vehicle Detection & Counting", frame)
 
-    print("\n========== SIGNAL DECISION ==========")
-    print("Lane Counts:", approach_counts)
-    print("Active Lane:", active_lane)
-    print("Vehicle Count:", vehicle_count)
-    print("Green Time:", green_time, "seconds")
-    print("=====================================\n")
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
 
-    elapsed = time.time() - cycle_start
-    if elapsed < INTERVAL:
-        time.sleep(INTERVAL - elapsed)
+cap.release()
+cv2.destroyAllWindows()

@@ -2,6 +2,7 @@ import requests
 import cv2
 import torch
 import time
+import numpy as np
 from ultralytics import YOLO
 
 # ==========================================
@@ -9,12 +10,11 @@ from ultralytics import YOLO
 # ==========================================
 BACKEND_URL = "http://127.0.0.1:8000"
 INTERSECTION_ID = 1
-INTERVAL = 2.0
+INTERVAL = 2.0  # seconds between sending counts
 
 MODEL_NAME = "yolov8x.pt"
 IMAGE_SIZE = 1280
 CONFIDENCE = 0.25
-
 VEHICLE_CLASSES = ["car", "motorcycle", "bus", "truck"]
 
 # ==========================================
@@ -40,20 +40,82 @@ videos = {
 }
 
 last_frames = {lane: None for lane in videos.keys()}
+frame_indices = {lane: 0 for lane in videos.keys()}
+video_fps = {lane: videos[lane].get(cv2.CAP_PROP_FPS) or 25 for lane in videos.keys()}
+video_total_frames = {lane: int(videos[lane].get(cv2.CAP_PROP_FRAME_COUNT)) for lane in videos.keys()}
 
-print("Vehicle Detection Started...\n")
+# ==========================================
+# UPDATED POLYGONS (YOUR NEW VALUES)
+# ==========================================
+polygons = {
+    "N": [[489, 719], [1274, 718], [687, 278], [606, 280], [485, 715]],
 
+    "S": [[326, 717], [544, 349], [600, 308], [612, 285],
+          [705, 284], [769, 380], [862, 601], [914, 718], [326, 717]],
+
+    "E": [[132, 719], [1279, 716], [1278, 368], [855, 136],
+          [760, 65], [566, 58], [348, 376], [131, 716]],
+
+    "W": [[466, 718], [1031, 719], [841, 335], [748, 220],
+          [623, 218], [554, 371], [507, 553], [467, 714], [465, 718]]
+}
+
+# ==========================================
+# INITIAL SCAN
+# ==========================================
+print("Initial scan of all lanes...")
+for lane, cap in videos.items():
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    ret, frame = cap.read()
+    last_frames[lane] = frame
+    frame_indices[lane] = 0
+print("Initial scan done.\n")
+
+# ==========================================
+# DETECTION FUNCTION
+# ==========================================
+def detect_vehicles(frame, polygon):
+    polygon_np = np.array(polygon, np.int32)
+
+    results = model.predict(
+        frame,
+        imgsz=IMAGE_SIZE,
+        conf=CONFIDENCE,
+        device=device,
+        half=True,
+        verbose=False
+    )
+
+    count = 0
+    for result in results:
+        if result.boxes is None:
+            continue
+
+        for box in result.boxes:
+            cls = int(box.cls[0])
+            if model.names[cls] not in VEHICLE_CLASSES:
+                continue
+
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+
+            if cv2.pointPolygonTest(polygon_np, (cx, cy), False) >= 0:
+                count += 1
+
+    return count
+
+# ==========================================
+# MAIN LOOP
+# ==========================================
 next_run_time = time.time()
 
 while True:
-
     now = time.time()
     if now < next_run_time:
         time.sleep(next_run_time - now)
 
-    # ======================================
-    # GET SIGNAL STATE
-    # ======================================
+    # GET SIGNAL STATUS
     try:
         response = requests.get(
             f"{BACKEND_URL}/traffic/status/{INTERSECTION_ID}",
@@ -62,55 +124,48 @@ while True:
         signal = response.json()
         green_lane = signal.get("active_lane")
         phase = signal.get("phase")
+        remaining_time = signal.get("remaining_time", 0)
     except:
         green_lane = None
         phase = "ALL_RED"
+        remaining_time = 0
 
+    pre_green_scan = remaining_time <= 3
     approach_counts = {}
 
-    # ======================================
-    # PROCESS LANES
-    # ======================================
-    for direction, cap in videos.items():
+    for lane, cap in videos.items():
 
-        if direction == green_lane and phase == "GREEN":
+        process_lane = (
+            (lane == green_lane and phase == "GREEN")
+            or pre_green_scan
+        )
+
+        if process_lane:
+            frame_indices[lane] += int(INTERVAL * video_fps[lane])
+
+            if frame_indices[lane] >= video_total_frames[lane]:
+                frame_indices[lane] = (
+                    frame_indices[lane] % video_total_frames[lane]
+                )
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_indices[lane])
             ret, frame = cap.read()
 
             if not ret:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 ret, frame = cap.read()
 
-            last_frames[direction] = frame
+            last_frames[lane] = frame
         else:
-            frame = last_frames[direction]
+            frame = last_frames[lane]
 
-            if frame is None:
-                ret, frame = cap.read()
-                last_frames[direction] = frame
+        count = detect_vehicles(frame, polygons[lane])
+        approach_counts[lane] = count
 
-        results = model.predict(
-            frame,
-            imgsz=IMAGE_SIZE,
-            conf=CONFIDENCE,
-            device=device,
-            half=True,
-            verbose=False
-        )
+        video_sec = frame_indices[lane] / video_fps[lane]
+        print(f"Lane {lane} - Time: {video_sec:.2f}s - Vehicles: {count}")
 
-        count = 0
-        for result in results:
-            if result.boxes is None:
-                continue
-            for box in result.boxes:
-                cls = int(box.cls[0])
-                if model.names[cls] in VEHICLE_CLASSES:
-                    count += 1
-
-        approach_counts[direction] = count
-
-    # ======================================
-    # SEND COUNTS
-    # ======================================
+    # SEND COUNTS TO BACKEND
     try:
         requests.post(
             f"{BACKEND_URL}/traffic/bulk_update",
@@ -123,13 +178,14 @@ while True:
     except Exception as e:
         print("Backend error:", e)
 
-    # ======================================
-    # TERMINAL LOG
-    # ======================================
-    print("\n========== SIGNAL SYNC ==========")
-    print("Phase:", phase)
-    print("Green Lane:", green_lane)
-    print("Counts:", approach_counts)
-    print("=================================\n")
+    print(f"""
+========== SIGNAL SYNC ==========
+Green Lane : {green_lane}
+Phase      : {phase}
+Remaining  : {remaining_time}s
+Counts     : {approach_counts}
+=================================
+""")
 
     next_run_time += INTERVAL
+    
